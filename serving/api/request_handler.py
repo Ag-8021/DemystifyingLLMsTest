@@ -39,20 +39,24 @@ class RequestHandler:
         else:
             prompt_tokens = [ord(c) for c in prompt]
 
-        # Generate continuation
-        if self.engine is not None and hasattr(self.engine, "generate_tokens"):
+        if self.engine is None:
+            raise RuntimeError("No inference engine is configured")
+        if hasattr(self.engine, "generate_tokens"):
             generated_tokens = self.engine.generate_tokens(
                 prompt_tokens=prompt_tokens,
                 max_new_tokens=max_tokens,
-                temperature=temperature
+                temperature=temperature,
+                top_k=request_body.get("top_k"),
+                top_p=request_body.get("top_p"),
             )
-        elif self.engine is not None and hasattr(self.engine, "generate"):
-            raw_gen = self.engine.generate(prompt, tokenizer=self.tokenizer, max_new_tokens=max_tokens)
-            generated_tokens = prompt_tokens + [101, 102]
+            if self.tokenizer is None or not hasattr(self.tokenizer, "decode"):
+                raise ValueError("A tokenizer with decode() is required")
+            response_text = self.tokenizer.decode(generated_tokens[len(prompt_tokens):])
+        elif hasattr(self.engine, "generate"):
+            response_text = self.engine.generate(prompt, tokenizer=self.tokenizer, max_new_tokens=max_tokens, temperature=temperature)
+            generated_tokens = prompt_tokens
         else:
-            generated_tokens = prompt_tokens + [prompt_tokens[-1] + 1 if prompt_tokens else 42]
-
-        response_text = generated_tokens
+            raise RuntimeError("The configured inference engine cannot generate text")
 
         return {
             "id": f"cmpl-{uuid.uuid4().hex[:12]}",
@@ -69,8 +73,8 @@ class RequestHandler:
             ],
             "usage": {
                 "prompt_tokens": len(prompt_tokens),
-                "completion_tokens": len(generated_tokens) - len(prompt_tokens),
-                "total_tokens": len(generated_tokens)
+                "completion_tokens": max(0, len(generated_tokens) - len(prompt_tokens)) if self.tokenizer is not None and hasattr(self.engine, "generate_tokens") else max_tokens,
+                "total_tokens": len(prompt_tokens) + (max(0, len(generated_tokens) - len(prompt_tokens)) if self.tokenizer is not None and hasattr(self.engine, "generate_tokens") else max_tokens)
             }
         }
 
