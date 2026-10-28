@@ -65,6 +65,7 @@ class ServingPipeline:
             output_ids = autoregressive_generate(
                 self.model, input_ids, max_new_tokens=max_new_tokens,
                 eos_token_id=getattr(getattr(self.tokenizer, "vocab", None), "eos_token_id", None),
+                use_cache=self.inference_config.use_kv_cache,
             )
         else:
             output_ids = input_ids

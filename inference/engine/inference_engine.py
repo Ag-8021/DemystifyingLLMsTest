@@ -3,6 +3,7 @@ High-level inference engine coordinating model execution, caching, and sampling.
 """
 
 from typing import Optional, List, Union, Any
+import inspect
 import torch
 import torch.nn as nn
 
@@ -110,10 +111,18 @@ class InferenceEngine:
             from config.constants import EOS_TOKEN_ID
             stop_ids.add(EOS_TOKEN_ID)
 
-        use_cache = self.inference_config.use_kv_cache and isinstance(self.model, FullTransformerModel)
+        try:
+            parameters = inspect.signature(self.model.forward).parameters.values()
+            supports_cache = any(
+                parameter.name == "kv_cache" or parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters
+            )
+        except (AttributeError, TypeError, ValueError):
+            supports_cache = isinstance(self.model, FullTransformerModel)
+        use_cache = self.inference_config.use_kv_cache and supports_cache
         if use_cache:
             from inference.generation import KVCache
-            kv_cache = KVCache(self.model_config.n_layers)
+            kv_cache = KVCache(getattr(self.model, "num_layers", self.model_config.n_layers))
         else:
             kv_cache = None
 

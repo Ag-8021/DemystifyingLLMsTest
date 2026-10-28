@@ -1,5 +1,6 @@
 """Autoregressive token generation."""
 from typing import Optional, Callable
+import inspect
 import torch
 from .kv_cache import KVCache
 from .stop_criteria import StopCriteria
@@ -28,7 +29,17 @@ def autoregressive_generate(
         max_length=generated.size(1) + max_new_tokens,
         eos_token_id=eos_token_id,
     )
-    kv_cache = KVCache(num_layers=getattr(model, "num_layers", 12)) if use_cache else None
+    supports_cache = False
+    if use_cache:
+        try:
+            parameters = inspect.signature(model.forward).parameters.values()
+            supports_cache = any(
+                parameter.name == "kv_cache" or parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters
+            )
+        except (AttributeError, TypeError, ValueError):
+            supports_cache = False
+    kv_cache = KVCache(num_layers=getattr(model, "num_layers", 12)) if use_cache and supports_cache else None
     finished = torch.zeros(batch_size, dtype=torch.bool, device=generated.device)
 
     with torch.no_grad():
