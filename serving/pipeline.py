@@ -28,11 +28,9 @@ class ServingPipeline:
     ):
         self.model = model
         self.tokenizer = tokenizer
-        try:
-            self.config = config or ModelConfig()
-        except Exception:
-            self.config = ModelConfig(d_model=768, vocab_size=50257)
+        self.config = config or ModelConfig()
         self.inference_config = inference_config or InferenceConfig()
+        self.inference_config.validate()
         self.device = torch.device(device) if device else torch.device("cpu")
 
     def process(self, text: str, max_new_tokens: Optional[int] = None) -> str:
@@ -58,13 +56,35 @@ class ServingPipeline:
             raise RuntimeError("No callable model is available")
 
         input_ids = torch.as_tensor(tokens, dtype=torch.long, device=self.device).unsqueeze(0)
+        if hasattr(self.model, "to"):
+            self.model.to(self.device)
+        if hasattr(self.model, "eval"):
+            self.model.eval()
         if max_new_tokens is None:
             max_new_tokens = self.inference_config.max_new_tokens
         if max_new_tokens > 0:
             from inference.generation.autoregressive import autoregressive_generate
+            from inference.sampling import Sampler
+
+            sampler_fn = None
+            if self.inference_config.temperature > 0:
+                sampler = Sampler(
+                    temperature=self.inference_config.temperature,
+                    top_k=self.inference_config.top_k,
+                    top_p=self.inference_config.top_p,
+                    repetition_penalty=self.inference_config.repetition_penalty,
+                )
+                generator = None
+                if self.inference_config.seed is not None:
+                    generator = torch.Generator(device=self.device).manual_seed(self.inference_config.seed)
+
+                def sampler_fn(logits, history):
+                    return sampler.sample(logits, generated_tokens=history, generator=generator)
+
             output_ids = autoregressive_generate(
                 self.model, input_ids, max_new_tokens=max_new_tokens,
                 eos_token_id=getattr(getattr(self.tokenizer, "vocab", None), "eos_token_id", None),
+                sampler_fn=sampler_fn,
                 use_cache=self.inference_config.use_kv_cache,
             )
         else:
