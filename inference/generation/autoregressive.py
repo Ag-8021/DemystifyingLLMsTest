@@ -11,7 +11,7 @@ def autoregressive_generate(
     input_ids: torch.Tensor,
     max_new_tokens: int = 20,
     eos_token_id: Optional[int] = None,
-    sampler_fn: Optional[Callable[..., torch.Tensor]] = None,
+    sampler_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     use_cache: bool = False,
 ) -> torch.Tensor:
     """Generate up to ``max_new_tokens`` tokens for each prompt in a batch."""
@@ -53,21 +53,7 @@ def autoregressive_generate(
             if sampler_fn is None:
                 next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
             else:
-                try:
-                    sampler_parameters = inspect.signature(sampler_fn).parameters.values()
-                    accepts_history = any(
-                        parameter.kind == inspect.Parameter.VAR_POSITIONAL
-                        for parameter in sampler_parameters
-                    ) or len([
-                        parameter for parameter in sampler_parameters
-                        if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-                    ]) >= 2
-                except (TypeError, ValueError):
-                    accepts_history = False
-                next_token = (
-                    sampler_fn(next_token_logits, generated)
-                    if accepts_history else sampler_fn(next_token_logits)
-                )
+                next_token = sampler_fn(next_token_logits)
                 if next_token.dim() == 1:
                     next_token = next_token.unsqueeze(-1)
 
